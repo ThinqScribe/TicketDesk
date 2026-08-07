@@ -1,0 +1,32 @@
+# Web framework
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+python-multipart==0.0.27
+
+# Database
+sqlalchemy==2.0.48
+alembic==1.19.0
+psycopg2-binary==2.9.10   # Postgres driver for production; SQLite works without it
+
+# Auth & security
+python-jose[cryptography]==3.5.0
+bcrypt==5.0.0
+passlib==1.7.4
+
+# Settings & validation
+pydantic==2.12.5
+pydantic-settings==2.13.1
+pydantic[email]==2.12.5
+email-validator==2.3.0
+
+# Email
+resend==2.35.0
+
+# Payments
+stripe==12.4.0
+
+# Rate limiting
+redis==7.4.0
+
+# Seed script
+faker==40.36.0
