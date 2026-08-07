@@ -1,0 +1,302 @@
+Let me read everything in parallel batches.
+
+I've now read every file. Here is the full audit.
+
+---
+
+## TicketDesk Backend — Comprehensive Production Audit
+
+---
+
+### 1. Missing Endpoints
+
+**Critical gaps for a production SaaS ticketing app:**
+
+**a) No `DELETE /tickets/{id}`**
+There's no way to delete a ticket. Even if soft-deletion is preferred, neither exists. `routers/tickets.py` has GET, POST, GET by ID, and PATCH only.
+
+**b) No `DELETE /comments/{comment_id}`** (or `PATCH`)
+`routers/comments.py` has list and create only. Agents and admins have no way to edit or delete a comment they posted.
+
+**c) No `GET /tickets/{ticket_id}/comments/{comment_id}`**
+No single-comment fetch endpoint.
+
+**d) No tenant management endpoints**
+There is a `TenantRead` schema and `TenantCreate` schema (`schemas/tenant.py`) but **zero tenant router**. No `GET /tenant/me`, no `PATCH /tenant` for renaming the company. The schemas exist with no backing route.
+
+**e) No `DELETE /users/{user_id}`** (or soft-delete)
+Users can be deactivated via `PATCH /{user_id}` with `is_active=false`, which is fine, but there's no hard-delete option at all — relevant for GDPR/right-to-erasure compliance.
+
+**f) No `GET /customers/{id}/tickets`**
+There's no way to fetch all tickets for a specific customer without filtering the full ticket list. A standard SaaS feature.
+
+**g) No `POST /billing/portal`** (Stripe Customer Portal)
+You have checkout session creation and webhooks, but no Stripe Billing Portal endpoint. Without it, users can't self-manage their subscription (cancel, update payment method). This is a standard Stripe integration omission.
+
+**h) No `GET /billing/invoices`**
+No way to retrieve past invoices/receipts.
+
+**i) No search/filter on customers**
+`GET /customers/` has `skip`/`limit` pagination but no `search` query param for filtering by name or email.
+
+**j) `GET /tickets/` has no date range filter**
+Common requirement for ticket reporting — no `created_after`, `created_before` filters.
+
+**k) No stats/dashboard endpoint**
+`GET /tickets/stats` or similar (open/closed counts by status/priority) is a baseline need for any ticketing dashboard.
+
+---
+
+### 2. Bugs, Inconsistencies, Incomplete Implementations
+
+**a) `db/database.py` — `autoflush=True` on SessionLocal (line 8)**
+`autoflush=True` is the SQLAlchemy default but is dangerous here. The auth router does a `db.flush()` to get `tenant.id` before creating the user, which is intentional. But `autoflush=True` means SQLAlchemy will auto-flush before any query, potentially emitting partial writes inside a transaction before a deliberate `db.commit()`. Should be `autoflush=False` for explicit control in a web app.
+
+**b) `routers/auth.py` — Signup doesn't create a `Subscription` row (line 45–57)**
+`_create_tenant` in `seed.py` correctly creates both a `Tenant` and a `Subscription`. But the `signup` endpoint in `auth.py` only creates a `Tenant` — no `Subscription` row. This means:
+- `GET /billing` calls `get_or_create_subscription()` which creates it lazily, but
+- `quota.py` checks `current_user.tenant.subscription_tier` directly (the tenant row), not the subscription table — so quota enforcement works. But the subscription row is missing until first billing call, which is inconsistent.
+
+**c) `routers/tickets.py` — `_apply_status` doesn't handle RESOLVED→re-open**
+`_apply_status` only clears `closed_at` when status goes back to `OPEN`. If a ticket is set to `RESOLVED` then back to `OPEN`, `closed_at` is already `None` (never set for RESOLVED), so this is actually fine. But the logic comment says "Only clear closed_at when explicitly re-opening" — PENDING status transitions from CLOSED are not handled: if ticket is CLOSED then set to PENDING, `closed_at` is never cleared. This is a logic bug.
+
+**d) `routers/customers.py` — delete leaves dangling `customer_id` on tickets (line 103–110)**
+The comment in the delete endpoint acknowledges this: "The customer's tickets are left intact (customer_id becomes orphaned)." But there's no cascade delete and no FK `ON DELETE SET NULL`. In PostgreSQL the delete will **raise a FK violation** at the DB level since `ticket.customer_id` is `NOT NULL`. This will cause a 500 error, not a clean 204. This is a real runtime bug.
+
+**e) `routers/users.py` — invited user has `is_verified=False` (never flipped)**
+When a user is invited via `POST /users/invite`, they are created with `is_verified=False` (the model default). There's no invite-acceptance flow, no token in the invite email, and no `POST /auth/verify-invite` endpoint. The invited user will log in with their temp password but remain perpetually unverified. The `/auth/resend-verification` endpoint exists but requires an already-authenticated user — that part works. However, there's nothing in the codebase that *gates* functionality behind `is_verified`, so it's just stale data rather than a blocking bug. Still, a senior engineer would flag it.
+
+**f) `routers/billing.py` — `stripe.Webhook.construct_event` uses deprecated API**
+`stripe.errors.SignatureVerificationError` — the `stripe` Python SDK v12 uses `stripe.error.SignatureVerificationError` (no `s` on `errors`). This will throw an `AttributeError` at runtime when an invalid signature is received, causing a 500 instead of a 400. **Verify the exact exception path for your stripe SDK version.**
+
+**g) `core/rate_limit.py` — auth endpoints not in `_SKIP_PREFIXES` but ARE in `_AUTH_PREFIXES` (line 148)**
+The `/auth/resend-verification` and `/auth/verify-email` and `/auth/refresh` and `/auth/reset-password` endpoints are **not in `_AUTH_PREFIXES`** (which only covers login, signup, forgot-password) and **not in `_SKIP_PREFIXES`**. They'll go through the tenant JWT path. `/auth/verify-email` and `/auth/reset-password` don't require a JWT (they use a special token in the body), so `_extract_tenant_from_scope` returns `(None, "free")` and they pass through — technically fine but only because the fallback is permissive. This is fragile.
+
+**h) `routers/tickets.py` — agents can be unassigned only by setting `assigned_agent_id` to... nothing**
+`TicketUpdate.assigned_agent_id` is `int | None = None`, where `None` means "not provided." There's no way to explicitly unassign a ticket (set `assigned_agent_id` to null). A sentinel value or a separate unassign endpoint is needed.
+
+**i) `seed.py` — orphaned comment block at end of file (lines 183–198)**
+There is a large triple-quoted string at the bottom of `seed.py` that is not assigned to anything — it's a docstring fragment masquerading as a comment. Python parses it as a string expression but it's dead code and would confuse static analysis tools.
+
+---
+
+### 3. Security Gaps
+
+**a) `.env` contains real credentials committed to the project**
+`c:\Users\USER\Documents\PROJECT\backend\.env` contains:
+- A real `RESEND_API_KEY` (`re_UHDfH3Ug_...`)
+- Real Stripe test keys (`sk_test_51RAunK...`, `pk_test_51RAunK...`)
+- A real Stripe webhook secret (`whsec_5878c1ac...`)
+- A real Stripe price ID
+
+Even if these are test keys, this file should never be committed. `.gitignore` at the project root should exclude it — confirm it does. The `.dockerignore` correctly excludes `.env` from the image, but if the repo is public, these are already leaked.
+
+**b) `SECRET_KEY` default is `"your-generated-secret-here"` (.env line 8)**
+A weak/placeholder secret key. JWTs signed with this are trivially forgeable if someone knows the value. The `.env.docker` placeholder `"change-me-to-a-long-random-string-before-deploying"` is also weak and is the actual value used in Docker unless changed.
+
+**c) No refresh token rotation invalidation / blacklist**
+`POST /auth/refresh` issues a new refresh token on every call but the old refresh token remains valid until its expiry (`REFRESH_TOKEN_EXPIRE_DAYS=7`). There's no token blacklist. If a refresh token is stolen, the attacker has a 7-day window with no revocation path.
+
+**d) Password reset tokens are not single-use**
+`POST /auth/reset-password` uses `decode_special_token` but never marks the token as used. The same password-reset link can be used multiple times within the 30-minute window.
+
+**e) `auth/login` uses `OAuth2PasswordBearer(tokenUrl="auth/login")` but login accepts JSON, not form data**
+`core/dependencies.py` line 6: `OAuth2PasswordBearer(tokenUrl="auth/login")` — this sets up the Swagger UI "Authorize" button to send `application/x-www-form-urlencoded`. But `POST /auth/login` accepts a JSON body (`LoginRequest`). The Swagger auth button will fail. This isn't a runtime security flaw but it's a developer experience bug and technically an OAuth2 spec violation.
+
+**f) No HTTPS enforcement**
+The Dockerfile and docker-compose run Uvicorn directly on port 8000 with no TLS termination. For production this must sit behind a reverse proxy (nginx/Caddy/Traefik) with HTTPS. There's no `Strict-Transport-Security` header, no redirect from HTTP → HTTPS.
+
+**g) CORS is too permissive for production**
+`allow_methods=["*"]` and `allow_headers=["*"]` in `main.py`. For production, these should be restricted to the actual methods and headers used.
+
+**h) No `is_verified` gate on sensitive operations**
+Users who never verify their email can still invite other users, create tickets, and access all functionality. The verification flag is collected but never enforced.
+
+**i) Stripe webhook endpoint is missing CSRF protection / content-type validation**
+The webhook doesn't validate `Content-Type: application/json`. Minor, but the signature check is the real guard here — this is mostly fine.
+
+**j) `generate_password` uses a charset of only 68 chars × 12 length**
+`string.ascii_letters + string.digits + "!@#$%"` = 26+26+10+5 = 67 chars. At 12 chars, entropy is ~73 bits. Acceptable but weak if the invited user never changes it. The invite email says to change it but nothing enforces a password change on first login.
+
+---
+
+### 4. Missing Schema Validations
+
+**a) `schemas/auth.py` — password validator checks length only (line 5–8)**
+`_validate_password` only checks `len(value) < 8`. No uppercase, digit, or special char requirement. The seed script uses `"Password1!"` as the standard password, implying a stronger policy is intended but not enforced at the API level.
+
+**b) `schemas/ticket.py` — `subject` and `description` have no length limits**
+`TicketCreate.subject: str` — no `min_length`, no `max_length`. A caller can send a 10MB description and it'll be stored. Should have e.g. `Field(..., min_length=1, max_length=200)` for subject and a reasonable cap on description.
+
+**c) `schemas/customer.py` — `name` has no length validation**
+`CustomerCreate.name: str` — no constraints. Same issue.
+
+**d) `schemas/comment.py` — `body` has no length validation**
+`CommentCreate.body: str` — no `min_length=1`, `max_length`. Empty comments can be created.
+
+**e) `schemas/user.py` — `first_name` / `last_name` have no validation**
+`UserBase.first_name: str`, `last_name: str` — empty strings allowed, no max length.
+
+**f) `schemas/tenant.py` — `TenantCreate.company_name` has no length/format validation**
+No `min_length`, no `max_length`. A blank company name would pass validation and create a broken slug.
+
+**g) `schemas/auth.py` — `SignupRequest.company_name` has no validation**
+Same as above — no `min_length=1`.
+
+**h) `schemas/user.py` — `UserCreate` doesn't include `password`**
+`POST /users/invite` uses `UserCreate` which has no `password` field — that's intentional (password is auto-generated). But `UserCreate` also inherits `UserBase` and adds `role` — there's no way for the caller to set `first_name`/`last_name` through this schema since `UserCreate` inherits from `UserBase` which requires them. Actually this is fine — just noting the invite requires first+last name which is a reasonable UX ask.
+
+---
+
+### 5. Alembic Setup
+
+**Overall: Solid. A few issues:**
+
+**a) Migration missing `updated_at` on the `ticket` table**
+`models/ticket.py` defines `updated_at = Column(DateTime(timezone=True), ...)` on the Ticket model. The migration (`20260807_2017_755f8edd327c_initial_schema.py`) creates the `ticket` table but **does not include an `updated_at` column** (lines 127–144 of the migration). The model has it; the migration doesn't. This is a model/migration drift. When running against a fresh Postgres, `updated_at` on `ticket` will be missing.
+
+**b) `tenant` table uses `DateTime` (no timezone) while others use `DateTime(timezone=True)`**
+`models/tenant.py` — `created_at = Column(DateTime, ...)` (no timezone). All other models use `DateTime(timezone=True)`. Inconsistent. The migration reflects this inconsistency (tenant table uses `sa.DateTime()` while others use `sa.DateTime(timezone=True)`). In Postgres this means `tenant.created_at` is stored as `TIMESTAMP WITHOUT TIME ZONE`.
+
+**c) `alembic.ini` — `sqlalchemy.url` placeholder**
+The `alembic.ini` doesn't have a `sqlalchemy.url` entry at all (it's overridden in `env.py` via `settings.DATABASE_URL`). This is fine but means `alembic` commands run without a `.env` file will fail silently or use an empty URL.
+
+**d) `compare_type=True` in `env.py` is good** — will catch column type changes on `alembic revision --autogenerate`. No issue.
+
+**e) No `compare_server_default=True`** — server default changes won't be auto-detected. Minor.
+
+---
+
+### 6. Docker Setup
+
+**Overall: Good for dev, several gaps for production:**
+
+**a) No non-root user in Dockerfile**
+The container runs as `root`. A senior engineer will always flag this. Add:
+```dockerfile
+RUN adduser --disabled-password --gecos "" appuser
+USER appuser
+```
+
+**b) Migrations run in the same container as the app (CMD line)**
+`CMD ["sh", "-c", "alembic upgrade head && uvicorn ..."]` — in a production multi-replica deployment, if two containers start simultaneously, both run migrations. Alembic uses a lock (the `alembic_version` table) but this is fragile. The standard pattern is a separate init container or a one-off migration job.
+
+**c) No `HEALTHCHECK` in Dockerfile**
+The Dockerfile has no `HEALTHCHECK` instruction. docker-compose has healthchecks for postgres and redis but not for the api service. The `api` service depends on postgres/redis health but isn't itself health-checked. Add:
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:8000/health || exit 1
+```
+(or use `wget` since curl isn't installed in slim)
+
+**d) No Uvicorn worker count / `--workers` flag**
+`CMD ... uvicorn main:app --host 0.0.0.0 --port 8000` — single worker. In production, use `gunicorn -k uvicorn.workers.UvicornWorker -w 4` or `uvicorn --workers 4`. With only one worker, the async rate-limiter's Redis calls serialize behind a single event loop.
+
+**e) `database.db` SQLite file excluded from `.dockerignore` but not `.env`**
+`.dockerignore` excludes `.env` (correct) and `*.db` (correct). Good. But the actual `.env` exclusion path is `.env` only — if someone adds `.env.local` or `.env.prod`, those won't be excluded.
+
+**f) `docker-compose.yml` — Postgres and Redis passwords are hardcoded weak values**
+`POSTGRES_PASSWORD: ticketdesk` and no Redis password. Acceptable for local dev but the compose file should have a comment warning not to use these values in production or stage environments.
+
+**g) `docker-compose.yml` — `api` service has no resource limits**
+No `mem_limit`, no `cpus`. A runaway request can OOM the host.
+
+**h) `docker-compose.yml` — no Redis password / `requirepass`**
+Redis is completely open on port 6379. Even though it's on a Docker network, it's also port-forwarded to the host (`ports: "6379:6379"`). Same for Postgres port 5432. In production these ports should not be exposed to the host.
+
+---
+
+### 7. Seed Script
+
+**Overall: Functional and well-structured. Two issues:**
+
+**a) Dead string at bottom of file (lines 183–198)**
+The large triple-quoted block at the end of `seed.py` is an orphaned string literal — not a docstring, not assigned, not a comment. It's dead code from a previous test run pasted in. Remove it.
+
+**b) `seed.py` calls `Base.metadata.create_all(engine)` (line 141)**
+This creates all tables based on the current model definitions, bypassing Alembic. If run against a database that was migrated with Alembic (where `ticket.updated_at` is missing due to the migration drift), `create_all` will do nothing (tables already exist) and the seed will proceed against a schema that has the `updated_at` column (from the model) — but Postgres won't have it. This causes a subtle bug where seeded tickets won't have `updated_at` populated correctly. Should use Alembic migrations rather than `create_all` for production-adjacent seeding.
+
+**c) No check for Postgres vs SQLite**
+The seed script works against SQLite in dev. Fine. But if run against the Docker Postgres, it will also wipe all data without confirmation — there's no `--force` guard.
+
+---
+
+### 8. Missing Dependencies in requirements.txt
+
+**a) `aiofiles` — not present but not used**
+Not a gap.
+
+**b) `httpx` — missing if you ever add tests**
+Not currently needed at runtime.
+
+**c) `stripe` — flagged as not installed in the linter warning**
+The package is in `requirements.txt` as `stripe==12.4.0` but the environment diagnostic says it's not installed. This means `routers/billing.py` will fail to import at startup. This needs to be resolved in the dev environment.
+
+**d) `passlib` — listed but may be unused**
+`requirements.txt` includes `passlib==1.7.4` but `core/security.py` uses `bcrypt` directly, not through `passlib`. `passlib` can be removed.
+
+**e) `python-multipart` — listed but may be unused**
+FastAPI needs this for form data. Since login is JSON-only, this may be unused. However, keeping it is harmless and it's needed if any file upload endpoints are added.
+
+**f) No `gunicorn` in requirements.txt**
+If you follow the production recommendation of using `gunicorn + UvicornWorker`, it needs to be added.
+
+**g) No pinned transitive dependencies / lockfile**
+There's no `requirements.lock` or `pip-compile` output. `requirements.txt` uses exact versions (`==`) for direct deps which is good, but transitive deps are unpinned. For reproducible production builds, a lockfile (via `pip-compile` or `poetry.lock`) is recommended.
+
+---
+
+### 9. Model/Schema Mismatches
+
+**a) `Ticket` model has `updated_at`, migration does not**
+Already covered in §5a. The ORM model defines `updated_at`, the `TicketRead` schema exposes `updated_at: datetime | None`, but the Alembic migration never creates this column. This is the most impactful mismatch.
+
+**b) `CustomerRead` schema exposes `created_at` but not `updated_at`**
+`models/customer.py` has both `created_at` and `updated_at`. `schemas/customer.py → CustomerRead` only exposes `created_at`. Minor inconsistency — the `updated_at` is silently dropped. Not a bug but inconsistent with other schemas.
+
+**c) `CommentRead` schema exposes `created_at` but not `updated_at`**
+Same pattern as customer — `models/comment.py` has `updated_at`, `schemas/comment.py → CommentRead` doesn't expose it.
+
+**d) `Tenant` model has `subscription_tier` and `Subscription` model also has `subscription_tier`**
+The tier is intentionally duplicated (denormalized for fast JWT lookups). But there's no enforced consistency mechanism — only the webhook handlers sync them. If the subscription table is updated directly (e.g., via migration or admin tooling), the tenant row could drift. A DB trigger or application-level constraint would close this.
+
+**e) `schemas/auth.py` — `SignupRequest` doesn't require `first_name`/`last_name` to be non-empty strings**
+The `User` model has `first_name NOT NULL` and `last_name NOT NULL`. The schema allows `first_name: str` which technically allows `""`. Pydantic won't reject an empty string without `min_length=1`.
+
+**f) `UserRole` is defined twice**
+`models/user.py` defines `UserRole(str, enum.Enum)` and `schemas/user.py` also defines `UserRole(str, Enum)`. They are kept in sync manually. If one is updated (e.g., adding a `VIEWER` role), the other must be updated too. A single source of truth would be cleaner.
+
+---
+
+### 10. What a Senior Engineer Would Flag as "Not Production Ready"
+
+In priority order:
+
+1. **Real credentials in `.env` committed to the repo.** Rotate the Resend API key and Stripe test keys immediately. Use a secrets manager or CI secrets injection.
+
+2. **`ticket.updated_at` column missing from the Alembic migration.** Any fresh Postgres deployment is missing this column despite the model and schema expecting it. Generate a new migration to add it.
+
+3. **Customer delete causes a 500 FK violation in Postgres.** The `DELETE /customers/{id}` endpoint will error in production because of the `ticket.customer_id NOT NULL` foreign key. Either cascade delete tickets, SET NULL (requires making the FK nullable), or block delete if open tickets exist.
+
+4. **No refresh token invalidation.** Stolen refresh tokens are valid for 7 days with no revocation mechanism. At minimum, a Redis-backed token blacklist on logout.
+
+5. **Single Uvicorn worker, no gunicorn.** One worker means no parallelism and poor throughput under load.
+
+6. **Container runs as root.** Basic security hardening.
+
+7. **Migrations run on every container start.** Multi-replica race condition risk. Use an init container.
+
+8. **Password strength validation is length-only.** No complexity rules.
+
+9. **No field-level length limits on any string inputs.** Subject, description, body — all unbounded. Easy to abuse storage.
+
+10. **`passlib` dependency is unused.** Dead dependency.
+
+11. **No `DELETE /tickets` endpoint and no Stripe Billing Portal endpoint.** Two missing features a paid SaaS would be expected to have on day one.
+
+12. **`autoflush=True` in SessionLocal.** Swap to `False` for explicit transaction control.
+
+13. **The `database.db` SQLite file is sitting in the backend root.** It should be in `.gitignore` (confirm it's excluded) and should never be in the Docker image (`.dockerignore` correctly handles this).
+
+14. **No structured logging / request ID middleware.** All errors go through `logger.error` but there's no correlation ID on requests, no JSON log formatting, no log aggregation configuration. A production app needs `structlog` or similar.
+
+15. **The `nul` file in the backend root** (`c:\Users\USER\Documents\PROJECT\backend\nul`) — this is a Windows artifact from a redirected command like `> nul`. It should be deleted and added to `.gitignore`.
