@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ArrowRight,
   Play,
@@ -6,6 +7,7 @@ import {
   BarChart2,
   CheckCircle2,
   MessageCircle,
+  X,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,18 +212,48 @@ const STATS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function HeroSection() {
+  const [videoOpen, setVideoOpen] = useState(false);
+
   return (
-    <section
-      className="
+    <>
+      {/* ── Video Modal ─────────────────────────────────────────────────── */}
+      {videoOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setVideoOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button */}
+            <button
+              onClick={() => setVideoOpen(false)}
+              className="absolute top-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <video
+              src="/TicketDeskVideo.mp4"
+              controls
+              autoPlay
+              className="w-full aspect-video bg-black"
+            />
+          </div>
+        </div>
+      )}
+      <section
+        className="
         relative
         w-full
         overflow-hidden
         bg-[#F8FAFF]
       "
-      style={{
-        minHeight: "720px",
-      }}
-    >
+        style={{
+          minHeight: "720px",
+        }}
+      >
       {/* ═════════════════════════════════════════════════════════════════════
           BACKGROUND GLOW
       ═════════════════════════════════════════════════════════════════════ */}
@@ -367,8 +399,8 @@ export default function HeroSection() {
                 <ArrowRight className="h-5 w-5" />
               </a>
 
-              <a
-                href="#demo"
+              <button
+                onClick={() => setVideoOpen(true)}
                 className="
                   inline-flex
                   items-center
@@ -403,7 +435,7 @@ export default function HeroSection() {
                     "
                   />
                 </span>
-              </a>
+              </button>
             </div>
 
             {/* Stats */}
@@ -544,6 +576,7 @@ export default function HeroSection() {
           </div>
         </div>
       </div>
-    </section>
+      </section>
+    </>
   );
 }
