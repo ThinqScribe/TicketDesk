@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     DATABASE_URL: str = ""
     DEBUG: bool = False
-    ALLOWED_ORIGINS: List[str] = []
+    ALLOWED_ORIGINS: str = ""  # stored as comma-separated string, parsed below
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
@@ -18,31 +18,27 @@ class Settings(BaseSettings):
 
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "noreply@ticketdesk.dev"
-    RESEND_INBOUND_SECRET: str = ""   # shared secret to verify Resend inbound webhooks
-    INBOUND_EMAIL_DOMAIN: str = ""    # e.g. "mail.ticketdesk.dev" — the domain Resend routes inbound mail to
+    RESEND_INBOUND_SECRET: str = ""
+    INBOUND_EMAIL_DOMAIN: str = ""
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLIC_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
-    STRIPE_PAID_PRICE_ID: str = ""  # the Price ID from your Stripe dashboard
+    STRIPE_PAID_PRICE_ID: str = ""
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # Requests per minute per tenant
     RATE_LIMIT_FREE: int = 100
     RATE_LIMIT_PAID: int = 1000
 
-    # Error monitoring (optional)
     SENTRY_DSN: str = ""
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def parse_origins(cls, value):
-        if not value:
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        """Return ALLOWED_ORIGINS as a parsed list."""
+        if not self.ALLOWED_ORIGINS:
             return []
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",")]
-        return value
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     class Config:
         env_file = ".env"
