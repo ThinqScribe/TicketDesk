@@ -13,7 +13,7 @@ from core.config import settings
 def create_email_verification_token(user_id:int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=24)
     payload = {"sub": str(user_id), "exp": expire, "type": "email_verification"}
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 def create_password_reset_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=30)
@@ -42,10 +42,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
+
 def generate_password(length: int = 12) -> str:
     """Generate a cryptographically secure random password."""
     alphabet = string.ascii_letters + string.digits + "!@#$%"
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
 
 
 

@@ -224,3 +224,20 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     seed(num_tenants=args.tenants)
+"""
+ [1/2] Creating tenant (paid tier)...
+      Tenant : Stevens, Williams and Keller
+      Owner  : suzannewilliams@example.com  /  Password1!
+      Admin  : nmartinez@example.net  /  Password1!
+      Agent1 : herreramikayla@example.net  /  Password1!
+      Agent2 : clinejose@example.com  /  Password1!
+
+  [2/2] Creating tenant (free tier)...
+      Tenant : Johnson, Hunt and Dominguez
+      Owner  : dlevy@example.com  /  Password1!
+      Admin  : perryjoseph@example.net  /  Password1!
+      Agent1 : heather22@example.org  /  Password1!
+      Agent2 : perezpatrick@example.org  /  Password1!
+
+Done. Database seeded successfully.
+"""

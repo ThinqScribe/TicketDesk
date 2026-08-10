@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.dependencies import get_current_user, require_role
+from core.email import send_ticket_confirmation_email, send_ticket_resolved_email
 from core.quota import check_ticket_quota
 from db.database import get_db
 from models.customer import Customer
@@ -12,6 +14,59 @@ from models.user import User, UserRole
 from schemas.ticket import TicketCreate, TicketPriority, TicketRead, TicketStatus, TicketUpdate
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+@router.get("/stats")
+def get_ticket_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns ticket counts grouped by status and priority for the current tenant.
+    Agents only see stats for tickets assigned to them.
+    """
+    base = db.query(Ticket).filter(Ticket.tenant_id == current_user.tenant_id)
+    if current_user.role == UserRole.AGENT:
+        base = base.filter(Ticket.assigned_agent_id == current_user.id)
+
+    # Count by status
+    status_rows = (
+        base.with_entities(Ticket.status, func.count(Ticket.id))
+        .group_by(Ticket.status)
+        .all()
+    )
+    by_status = {row[0]: row[1] for row in status_rows}
+
+    # Count by priority (open tickets only)
+    priority_rows = (
+        base.filter(Ticket.status == "open")
+        .with_entities(Ticket.priority, func.count(Ticket.id))
+        .group_by(Ticket.priority)
+        .all()
+    )
+    by_priority = {row[0]: row[1] for row in priority_rows}
+
+    total = sum(by_status.values())
+
+    return {
+        "total": total,
+        "by_status": {
+            "open": by_status.get("open", 0),
+            "pending": by_status.get("pending", 0),
+            "resolved": by_status.get("resolved", 0),
+            "closed": by_status.get("closed", 0),
+        },
+        "by_priority": {
+            "urgent": by_priority.get("urgent", 0),
+            "high": by_priority.get("high", 0),
+            "normal": by_priority.get("normal", 0),
+            "low": by_priority.get("low", 0),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +161,19 @@ def create_ticket(
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
+
+    # Notify the customer their complaint has been received
+    try:
+        send_ticket_confirmation_email(
+            to_email=customer.email,
+            customer_name=customer.name,
+            ticket_id=ticket.id,
+            subject=ticket.subject,
+            company_name=current_user.tenant.company_name,
+        )
+    except Exception:
+        pass  # Never let email failure break ticket creation
+
     return ticket
 
 
@@ -169,4 +237,19 @@ def update_ticket(
 
     db.commit()
     db.refresh(ticket)
+
+    # Notify the customer if their ticket was resolved or closed
+    if payload.status is not None and payload.status in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        try:
+            send_ticket_resolved_email(
+                to_email=ticket.customer.email,
+                customer_name=ticket.customer.name,
+                ticket_id=ticket.id,
+                subject=ticket.subject,
+                company_name=current_user.tenant.company_name,
+                status=ticket.status,
+            )
+        except Exception:
+            pass  # Never let email failure break the update
+
     return ticket

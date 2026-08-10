@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-navy:         #0F1B2D;
+  --color-indigo:       #4F46E5;
+  --color-indigo-hover: #6366F1;
+  --color-emerald:      #10B981;
+  --color-amber:        #F59E0B;
+  --color-rose:         #F43F5E;
+  --color-surface:      #F8FAFC;
+  --color-border:       #E2E8F0;
+  --font-sans: 'Inter', system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  background-color: #F8FAFC;
+  color: #0F1B2D;
+  -webkit-font-smoothing: antialiased;
+}

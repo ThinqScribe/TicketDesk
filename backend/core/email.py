@@ -98,3 +98,66 @@ def send_invite_email(
             </div>
         """,
     })
+
+
+def send_ticket_confirmation_email(
+    to_email: str,
+    customer_name: str,
+    ticket_id: int,
+    subject: str,
+    company_name: str,
+) -> None:
+    """Notify a customer that their complaint has been received."""
+    _send({
+        "from": settings.RESEND_FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"[#{ticket_id}] We've received your complaint – {company_name}",
+        "html": f"""
+            <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+                <h2>We've received your complaint</h2>
+                <p>Hi <strong>{customer_name}</strong>,</p>
+                <p>Your complaint has been logged and our team is looking into it. Here are your details:</p>
+                <div style="background:#f4f4f4; padding:12px; border-radius:6px; margin:16px 0;">
+                    <p style="margin:0;"><strong>Reference:</strong> #{ticket_id}</p>
+                    <p style="margin:8px 0 0;"><strong>Subject:</strong> {subject}</p>
+                </div>
+                <p>Please keep this reference number for any follow-up enquiries.</p>
+                <p style="color:#888; font-size:12px; margin-top:24px;">
+                    This is an automated notification from {company_name} via TicketDesk.
+                </p>
+            </div>
+        """,
+    })
+
+
+def send_ticket_resolved_email(
+    to_email: str,
+    customer_name: str,
+    ticket_id: int,
+    subject: str,
+    company_name: str,
+    status: str,
+) -> None:
+    """Notify a customer that their ticket has been resolved or closed."""
+    status_label = "resolved" if status == "resolved" else "closed"
+    _send({
+        "from": settings.RESEND_FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"[#{ticket_id}] Your complaint has been {status_label} – {company_name}",
+        "html": f"""
+            <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+                <h2>Your complaint has been {status_label}</h2>
+                <p>Hi <strong>{customer_name}</strong>,</p>
+                <p>We're writing to let you know that your complaint has been <strong>{status_label}</strong>.</p>
+                <div style="background:#f4f4f4; padding:12px; border-radius:6px; margin:16px 0;">
+                    <p style="margin:0;"><strong>Reference:</strong> #{ticket_id}</p>
+                    <p style="margin:8px 0 0;"><strong>Subject:</strong> {subject}</p>
+                    <p style="margin:8px 0 0;"><strong>Status:</strong> {status_label.capitalize()}</p>
+                </div>
+                <p>If you have any further questions, please don't hesitate to get back in touch.</p>
+                <p style="color:#888; font-size:12px; margin-top:24px;">
+                    This is an automated notification from {company_name} via TicketDesk.
+                </p>
+            </div>
+        """,
+    })

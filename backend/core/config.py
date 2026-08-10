@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = []
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     API_PREFIX: str = ""
 
@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "noreply@ticketdesk.dev"
+    RESEND_INBOUND_SECRET: str = ""   # shared secret to verify Resend inbound webhooks
+    INBOUND_EMAIL_DOMAIN: str = ""    # e.g. "mail.ticketdesk.dev" — the domain Resend routes inbound mail to
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLIC_KEY: str = ""

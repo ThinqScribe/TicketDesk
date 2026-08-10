@@ -106,9 +106,21 @@ def delete_customer(
 ):
     """
     Permanently delete a customer. Owner only.
-    The customer's tickets are left intact (assigned_agent_id / customer_id
-    becomes orphaned) — callers should resolve or close open tickets first.
+    Blocked if the customer has any tickets — resolve or close them first.
     """
+    from models.ticket import Ticket
     customer = get_customer_or_404(customer_id, current_user.tenant_id, db)
+
+    open_tickets = db.query(Ticket).filter(
+        Ticket.customer_id == customer.id,
+        Ticket.status.in_(["open", "pending"]),
+    ).count()
+
+    if open_tickets > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete customer with {open_tickets} open/pending ticket(s). Resolve or close them first.",
+        )
+
     db.delete(customer)
     db.commit()

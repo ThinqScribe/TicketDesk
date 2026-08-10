@@ -15,6 +15,7 @@ from core.security import (
     decode_special_token,
 )
 from db.database import get_db
+from models.subscription import Subscription
 from models.tenant import Tenant
 from models.user import User, UserRole
 from schemas.auth import (
@@ -58,6 +59,14 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=400, detail="A company with this name already exists")
 
+    # Create the free-tier subscription row alongside the tenant
+    subscription = Subscription(
+        tenant_id=tenant.id,
+        subscription_tier="free",
+        is_subscribed=False,
+    )
+    db.add(subscription)
+
     user = User(
         tenant_id=tenant.id,
         email=payload.email,
@@ -81,16 +90,39 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).first()
+    # Find user by email
+    user = db.query(User).filter(User.email == payload.email.lower().strip()).first()
+    
+    # Check credentials
     if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Incorrect email or password"
+        )
+    
+    # Check if user is active
     if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account is disabled")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Account is disabled. Contact your administrator."
+        )
 
-    token_data = {"sub": str(user.id), "tenant_id": user.tenant_id, "tier": user.tenant.subscription_tier}
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token({"sub": str(user.id)})
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    # Generate tokens with proper data
+    token_data = {
+        "sub": str(user.id), 
+        "tenant_id": user.tenant_id, 
+        "tier": user.tenant.subscription_tier
+    }
+    
+    try:
+        access_token = create_access_token(token_data)
+        refresh_token = create_refresh_token({"sub": str(user.id)})
+        return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate authentication tokens"
+        )
 
 
 @router.post("/refresh", response_model=TokenResponse)

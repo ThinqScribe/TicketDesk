@@ -78,8 +78,8 @@ def create_checkout_session(
         payment_method_types=["card"],
         mode="subscription",
         line_items=[{"price": settings.STRIPE_PAID_PRICE_ID, "quantity": 1}],
-        success_url=f"{settings.FRONTEND_URL}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{settings.FRONTEND_URL}/billing/cancel",
+        success_url=f"{settings.FRONTEND_URL}/dashboard/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard/billing/cancel",
         metadata={"tenant_id": str(tenant.id)},
     )
 
@@ -112,11 +112,16 @@ async def stripe_webhook(
         event = stripe.Webhook.construct_event(
             payload, stripe_signature, settings.STRIPE_WEBHOOK_SECRET
         )
-    except stripe.errors.SignatureVerificationError:
+    except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
 
     event_type = event["type"]
     data = event["data"]["object"]
+    # Convert StripeObject to plain dict so all handlers can use .get() safely
+    if hasattr(data, "to_dict"):
+        data = data.to_dict()
 
     if event_type == "checkout.session.completed":
         _handle_checkout_completed(data, db)
@@ -141,6 +146,30 @@ def _get_tenant_by_stripe_customer(stripe_customer_id: str, db: Session) -> Tena
     return db.query(Tenant).filter(Tenant.stripe_customer_id == stripe_customer_id).first()
 
 
+def _get_period_end(subscription: dict) -> int | None:
+    """
+    Extract current_period_end from a Stripe Subscription dict.
+    In API version 2025-03-31.basil it moved from the root to
+    subscription.items.data[0].current_period_end.
+    We fall back to the root field for older API versions.
+    """
+    # New location: items.data[0].current_period_end
+    try:
+        items = subscription.get("items", {})
+        if isinstance(items, dict):
+            data = items.get("data", [])
+        else:
+            data = list(items)
+        if data:
+            period_end = data[0].get("current_period_end") if isinstance(data[0], dict) else getattr(data[0], "current_period_end", None)
+            if period_end:
+                return period_end
+    except Exception:
+        pass
+    # Legacy location: root of subscription object
+    return subscription.get("current_period_end")
+
+
 def _handle_checkout_completed(session: dict, db: Session) -> None:
     """Upgrade the tenant to paid after a successful checkout."""
     # Guard: only process subscription-mode sessions
@@ -152,13 +181,15 @@ def _handle_checkout_completed(session: dict, db: Session) -> None:
         return
 
     stripe_subscription = stripe.Subscription.retrieve(session["subscription"])
-    period_end = stripe_subscription["current_period_end"]
+    stripe_sub_dict = stripe_subscription.to_dict() if hasattr(stripe_subscription, "to_dict") else dict(stripe_subscription)
+    period_end = _get_period_end(stripe_sub_dict)
 
     sub = get_or_create_subscription(tenant, db)
     sub.is_subscribed = True
+    sub.subscription_tier = "paid"  # ← MISSING LINE
     sub.stripe_subscription_id = session["subscription"]
     sub.subscribed_at = datetime.now(timezone.utc)
-    sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
+    sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc) if period_end else None
 
     # Mirror tier on the tenant row for fast lookups without joining subscription
     tenant.subscription_tier = "paid"
@@ -173,11 +204,11 @@ def _handle_subscription_updated(subscription: dict, db: Session) -> None:
         return
 
     is_active = subscription["status"] == "active"
+    period_end = _get_period_end(subscription)
 
     sub = get_or_create_subscription(tenant, db)
-    sub.current_period_end = datetime.fromtimestamp(
-        subscription["current_period_end"], tz=timezone.utc
-    )
+    if period_end:
+        sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
     sub.is_subscribed = is_active
 
     # Sync tier on both rows — handles reactivation after cancellation

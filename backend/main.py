@@ -1,7 +1,11 @@
 from contextlib import asynccontextmanager
+import logging
+import sys
+from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.rate_limit import RateLimitMiddleware, close_redis, init_redis
@@ -15,7 +19,16 @@ import models.tenant
 import models.ticket
 import models.user
 
-from routers import auth, billing, comments, customers, tickets, users
+from routers import auth, billing, comments, customers, tickets, users, tenant, inbound
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -25,8 +38,10 @@ async def lifespan(app: FastAPI):
     if settings.DEBUG:
         create_tables()
     await init_redis()
+    logger.info("Application startup complete")
     yield
     await close_redis()
+    logger.info("Application shutdown complete")
 
 
 app = FastAPI(
@@ -36,6 +51,15 @@ app = FastAPI(
     lifespan=lifespan,
     swagger_ui_parameters={"syntaxHighlight": False},
 )
+
+# Add global exception handler for better error logging
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception on {request.method} {request.url}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
 
 # Rate limiting must be added before CORS so it runs on every real request
 app.add_middleware(RateLimitMiddleware)
@@ -48,22 +72,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(tickets.router)
-app.include_router(comments.router)
-app.include_router(customers.router)
-app.include_router(billing.router)
+app.include_router(auth.router, prefix=settings.API_PREFIX)
+app.include_router(users.router, prefix=settings.API_PREFIX)
+app.include_router(tickets.router, prefix=settings.API_PREFIX)
+app.include_router(comments.router, prefix=settings.API_PREFIX)
+app.include_router(customers.router, prefix=settings.API_PREFIX)
+app.include_router(billing.router, prefix=settings.API_PREFIX)
+app.include_router(tenant.router, prefix=settings.API_PREFIX)
+app.include_router(inbound.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/health", tags=["health"])
 def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/", tags=["health"])
 def root():
-    return {"message": "TicketDesk API is running", "docs": "/docs"}
+    return {"message": "TicketDesk API is running", "docs": "/docs", "version": "0.1.0"}
 
 
 if __name__ == "__main__":
