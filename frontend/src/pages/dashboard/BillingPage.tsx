@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { CreditCard, CheckCircle2, ArrowRight } from "lucide-react";
-import { getSubscription, createCheckoutSession } from "@/lib/api";
+import { getSubscription, createCheckoutSession, createPortalSession } from "@/lib/api";
 import type { SubscriptionRead, UserRead } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth";
 
@@ -16,6 +16,7 @@ export default function BillingPage() {
   const [sub, setSub] = useState<SubscriptionRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
 
   useEffect(() => {
     if (user.role !== "owner") { setLoading(false); return; }
@@ -28,6 +29,14 @@ export default function BillingPage() {
       const { checkout_url } = await createCheckoutSession(token);
       window.location.href = checkout_url;
     } catch { setRedirecting(false); }
+  }
+
+  async function handlePortal() {
+    setPortalLoading(true);
+    try {
+      const { portal_url } = await createPortalSession(token);
+      window.location.href = portal_url;
+    } catch { setPortalLoading(false); }
   }
 
   if (user.role !== "owner") {
@@ -131,9 +140,13 @@ export default function BillingPage() {
                   {redirecting ? "Redirecting…" : "Upgrade to Pro"} <ArrowRight className="h-4 w-4" />
                 </button>
               ) : (
-                <div className="mt-6 block w-full rounded-full border border-amber-400 py-2.5 text-center text-sm font-semibold text-amber-400">
-                  ⭐ Current Plan
-                </div>
+                <button
+                  onClick={handlePortal}
+                  disabled={portalLoading}
+                  className="mt-6 flex w-full items-center justify-center gap-2 rounded-full border border-amber-400 py-2.5 text-sm font-semibold text-amber-400 hover:bg-amber-50 transition disabled:opacity-60"
+                >
+                  {portalLoading ? "Loading…" : "Manage Subscription"} <ArrowRight className="h-4 w-4" />
+                </button>
               )}
             </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useOutletContext, Link } from "react-router-dom";
-import { Plus, Filter } from "lucide-react";
+import { Plus, Filter, Search } from "lucide-react";
 import { listTickets, createTicket, listCustomers } from "@/lib/api";
 import type { TicketRead, CustomerRead, UserRead, TicketStatus, TicketPriority } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth";
@@ -40,6 +40,7 @@ export default function TicketsPage() {
   const [fetchError, setFetchError] = useState("");
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<TicketPriority | "">("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Create modal state
   const [showCreate, setShowCreate] = useState(false);
@@ -54,6 +55,7 @@ export default function TicketsPage() {
       listTickets(token, {
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(priorityFilter ? { priority: priorityFilter } : {}),
+        ...(searchQuery.trim() ? { q: searchQuery.trim() } : {}),
         limit: 100,
       }),
       canCreate ? listCustomers(token) : Promise.resolve([]),
@@ -61,7 +63,7 @@ export default function TicketsPage() {
       .then(([t, c]) => { setTickets(t); setCustomers(c); })
       .catch((err: unknown) => setFetchError(err instanceof Error ? err.message : "Failed to load tickets"))
       .finally(() => setLoading(false));
-  }, [token, statusFilter, priorityFilter, canCreate]);
+  }, [token, statusFilter, priorityFilter, searchQuery, canCreate]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -107,6 +109,19 @@ export default function TicketsPage() {
       {fetchError && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-[12px] text-red-600">{fetchError}</div>
       )}
+      
+      {/* Search bar */}
+      <div className="mb-4 relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search tickets..."
+          className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-[#E2E8F0] bg-white text-sm text-slate-700 outline-none focus:border-[#3159E8] focus:ring-1 focus:ring-[#3159E8]"
+        />
+      </div>
+      
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5 text-sm text-slate-500">
           <Filter className="h-4 w-4" /> Filter:

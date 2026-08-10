@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from core.dependencies import get_current_user
 from db.database import get_db
@@ -21,6 +21,21 @@ def get_ticket_or_404(ticket_id: int, tenant_id: int, db: Session) -> Ticket:
     return ticket
 
 
+def _enrich(comment: Comment) -> CommentRead:
+    """Convert a Comment ORM object to CommentRead with resolved author name."""
+    data = CommentRead.model_validate(comment)
+    if comment.author_user and comment.author_user.first_name:
+        u = comment.author_user
+        data.author_name = f"{u.first_name} {u.last_name}"
+        data.author_initials = (u.first_name[0] + u.last_name[0]).upper()
+    elif comment.author_customer and comment.author_customer.name:
+        c = comment.author_customer
+        parts = c.name.split()
+        data.author_name = c.name
+        data.author_initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else parts[0][0])).upper()
+    return data
+
+
 @router.get("/{ticket_id}/comments", response_model=list[CommentRead])
 def list_comments(
     ticket_id: int,
@@ -38,12 +53,16 @@ def list_comments(
     if current_user.role == UserRole.AGENT and ticket.assigned_agent_id != current_user.id:
         raise HTTPException(status_code=403, detail="You don't have access to this ticket")
 
-    query = db.query(Comment).filter(Comment.ticket_id == ticket.id)
+    query = (
+        db.query(Comment)
+        .options(joinedload(Comment.author_user), joinedload(Comment.author_customer))
+        .filter(Comment.ticket_id == ticket.id)
+    )
 
     if current_user.role == UserRole.AGENT:
         query = query.filter(Comment.is_internal == False)  # noqa: E712
 
-    return query.order_by(Comment.created_at).all()
+    return [_enrich(c) for c in query.order_by(Comment.created_at).all()]
 
 
 @router.post("/{ticket_id}/comments", response_model=CommentRead, status_code=status.HTTP_201_CREATED)
@@ -75,4 +94,13 @@ def add_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
-    return comment
+
+    # Reload with relationships for name resolution
+    db.refresh(comment)
+    comment = (
+        db.query(Comment)
+        .options(joinedload(Comment.author_user), joinedload(Comment.author_customer))
+        .filter(Comment.id == comment.id)
+        .first()
+    )
+    return _enrich(comment)

@@ -12,8 +12,8 @@ FREE_TIER_MAX_AGENTS = 3
 
 
 def check_ticket_quota(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Session,
+    current_user: User,
 ) -> None:
     """
     Dependency injected into POST /tickets.
@@ -39,9 +39,17 @@ def check_ticket_quota(
         )
 
 
-def check_agent_quota(
+def ticket_quota_dependency(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+) -> None:
+    """FastAPI dependency wrapper for check_ticket_quota."""
+    check_ticket_quota(db, current_user)
+
+
+def check_agent_quota(
+    db: Session,
+    current_user: User,
 ) -> None:
     """
     Dependency injected into POST /users/invite.
@@ -70,3 +78,11 @@ def check_agent_quota(
                 "Upgrade to paid plan to invite more agents."
             ),
         )
+
+
+def agent_quota_dependency(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """FastAPI dependency wrapper for check_agent_quota."""
+    check_agent_quota(db, current_user)

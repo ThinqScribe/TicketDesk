@@ -29,6 +29,9 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    notify_new_tickets: Optional[bool] = None
+    notify_ticket_updates: Optional[bool] = None
+    notify_comments: Optional[bool] = None
 
 
 class UserRead(UserBase):
@@ -39,6 +42,9 @@ class UserRead(UserBase):
     role: UserRole
     is_active: bool
     is_verified: bool
+    notify_new_tickets: bool
+    notify_ticket_updates: bool
+    notify_comments: bool
     created_at: datetime
     updated_at: datetime
     company_name: str = ""

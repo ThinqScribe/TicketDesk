@@ -10,7 +10,7 @@ from db.database import get_db
 from models.subscription import Subscription
 from models.tenant import Tenant
 from models.user import User, UserRole
-from schemas.subscription import CheckoutSessionResponse, SubscriptionRead
+from schemas.subscription import CheckoutSessionResponse, PortalSessionResponse, SubscriptionRead
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -84,6 +84,35 @@ def create_checkout_session(
     )
 
     return CheckoutSessionResponse(checkout_url=session.url)
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/portal-session — create a Stripe Customer Portal session
+# ---------------------------------------------------------------------------
+
+@router.post("/billing/portal-session", response_model=PortalSessionResponse)
+def create_portal_session(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+):
+    """
+    Creates a Stripe Customer Portal session for managing subscription, payment methods, and billing history.
+    Returns a URL the frontend redirects the user to.
+    """
+    tenant = current_user.tenant
+    
+    if not tenant.stripe_customer_id:
+        raise HTTPException(
+            status_code=400, 
+            detail="No Stripe customer found. Please create a subscription first."
+        )
+
+    session = stripe.billing_portal.Session.create(
+        customer=tenant.stripe_customer_id,
+        return_url=f"{settings.FRONTEND_URL}/dashboard/billing",
+    )
+
+    return PortalSessionResponse(portal_url=session.url)
 
 
 # ---------------------------------------------------------------------------

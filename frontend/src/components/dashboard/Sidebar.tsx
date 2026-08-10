@@ -6,6 +6,7 @@ import {
   UserCog,
   BarChart2,
   Settings,
+  Bell,
   CreditCard,
   LogOut,
   ChevronDown,
@@ -25,6 +26,7 @@ const NAV = [
   { to: "/dashboard/agents", icon: UserCog, label: "Agents" },
   { to: "/dashboard/reports", icon: BarChart2, label: "Reports" },
   { to: "/dashboard/settings", icon: Settings, label: "Settings" },
+  { to: "/dashboard/notifications", icon: Bell, label: "Notifications" },
   { to: "/dashboard/billing", icon: CreditCard, label: "Billing" },
 ];
 

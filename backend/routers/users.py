@@ -71,6 +71,22 @@ def update_user(
             raise HTTPException(status_code=400, detail="You cannot deactivate yourself")
         user.is_active = payload.is_active
 
+    # Notification settings - users can update their own
+    if payload.notify_new_tickets is not None:
+        if not is_self and not is_owner:
+            raise HTTPException(status_code=403, detail="You can only update your own notification settings")
+        user.notify_new_tickets = payload.notify_new_tickets
+
+    if payload.notify_ticket_updates is not None:
+        if not is_self and not is_owner:
+            raise HTTPException(status_code=403, detail="You can only update your own notification settings")
+        user.notify_ticket_updates = payload.notify_ticket_updates
+
+    if payload.notify_comments is not None:
+        if not is_self and not is_owner:
+            raise HTTPException(status_code=403, detail="You can only update your own notification settings")
+        user.notify_comments = payload.notify_comments
+
     db.commit()
     db.refresh(user)
     return UserRead.model_validate(user)

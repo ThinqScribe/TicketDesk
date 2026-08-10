@@ -35,6 +35,8 @@ interface Comment {
   is_internal: boolean;
   author_user_id: number | null;
   author_customer_id: number | null;
+  author_name: string;
+  author_initials: string;
   created_at: string;
 }
 
@@ -194,10 +196,10 @@ export default function TicketDetailPage() {
                   <div key={c.id} className={`px-5 py-4 ${c.is_internal ? "bg-amber-50" : ""}`}>
                     <div className="flex items-center gap-2 mb-2">
                       <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#EEF3FF] text-[10px] font-bold text-[#3159E8]">
-                        {c.author_user_id ? "U" : "C"}
+                        {c.author_initials || (c.author_user_id ? "U" : "C")}
                       </div>
                       <span className="text-[11px] font-medium text-slate-600">
-                        {c.author_user_id ? `User #${c.author_user_id}` : `Customer #${c.author_customer_id}`}
+                        {c.author_name || (c.author_user_id ? `User #${c.author_user_id}` : `Customer #${c.author_customer_id}`)}
                       </span>
                       {c.is_internal && (
                         <span className="flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-700">

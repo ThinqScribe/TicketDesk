@@ -119,6 +119,9 @@ export interface UserRead {
   role: UserRole;
   is_active: boolean;
   is_verified: boolean;
+  notify_new_tickets: boolean;
+  notify_ticket_updates: boolean;
+  notify_comments: boolean;
   created_at: string;
   updated_at: string;
   company_name: string;
@@ -148,6 +151,18 @@ export interface TicketRead {
   created_at: string;
   updated_at: string | null;
   closed_at: string | null;
+}
+
+export interface CommentRead {
+  id: number;
+  ticket_id: number;
+  author_user_id: number | null;
+  author_customer_id: number | null;
+  author_name: string;
+  author_initials: string;
+  body: string;
+  is_internal: boolean;
+  created_at: string;
 }
 
 export interface SubscriptionRead {
@@ -204,7 +219,7 @@ export const listUsers = (token: string) =>
 export const inviteUser = (token: string, data: { email: string; first_name: string; last_name: string; role: UserRole }) =>
   request<UserRead>("/users/invite", { method: "POST", body: JSON.stringify(data), headers: authHeaders(token) });
 
-export const updateUser = (token: string, userId: number, data: Partial<{ first_name: string; last_name: string; role: UserRole; is_active: boolean }>) =>
+export const updateUser = (token: string, userId: number, data: Partial<{ first_name: string; last_name: string; role: UserRole; is_active: boolean; notify_new_tickets: boolean; notify_ticket_updates: boolean; notify_comments: boolean }>) =>
   request<UserRead>(`/users/${userId}`, { method: "PATCH", body: JSON.stringify(data), headers: authHeaders(token) });
 
 export const removeUser = (token: string, userId: number) =>
@@ -216,6 +231,7 @@ export interface ListTicketsParams {
   status?: TicketStatus;
   priority?: TicketPriority;
   assigned_to_me?: boolean;
+  q?: string;
   skip?: number;
   limit?: number;
 }
@@ -225,6 +241,7 @@ export const listTickets = (token: string, params: ListTicketsParams = {}) => {
   if (params.status) q.set("status", params.status);
   if (params.priority) q.set("priority", params.priority);
   if (params.assigned_to_me) q.set("assigned_to_me", "true");
+  if (params.q) q.set("q", params.q);
   if (params.skip !== undefined) q.set("skip", String(params.skip));
   if (params.limit !== undefined) q.set("limit", String(params.limit));
   return request<TicketRead[]>(`/tickets/?${q}`, { headers: authHeaders(token) });
@@ -238,6 +255,9 @@ export const getTicket = (token: string, id: number) =>
 
 export const updateTicket = (token: string, id: number, data: Partial<{ subject: string; description: string; priority: TicketPriority; status: TicketStatus; assigned_agent_id: number }>) =>
   request<TicketRead>(`/tickets/${id}`, { method: "PATCH", body: JSON.stringify(data), headers: authHeaders(token) });
+
+export const deleteTicket = (token: string, id: number) =>
+  request<void>(`/tickets/${id}`, { method: "DELETE", headers: authHeaders(token) });
 
 export interface TicketStats {
   total: number;
@@ -263,6 +283,9 @@ export const getSubscription = (token: string) =>
 
 export const createCheckoutSession = (token: string) =>
   request<{ checkout_url: string }>("/billing/checkout-session", { method: "POST", headers: authHeaders(token) });
+
+export const createPortalSession = (token: string) =>
+  request<{ portal_url: string }>("/billing/portal-session", { method: "POST", headers: authHeaders(token) });
 // ─── Tenant ───────────────────────────────────────────────────────────────────
 
 export interface TenantRead {

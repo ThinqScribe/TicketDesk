@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.dependencies import get_current_user, require_role
 from core.email import send_ticket_confirmation_email, send_ticket_resolved_email
-from core.quota import check_ticket_quota
+from core.quota import ticket_quota_dependency
 from db.database import get_db
 from models.customer import Customer
 from models.ticket import Ticket
@@ -103,6 +103,7 @@ def list_tickets(
     status: TicketStatus | None = Query(None, description="Filter by status"),
     priority: TicketPriority | None = Query(None, description="Filter by priority"),
     assigned_to_me: bool = Query(False, description="Agents: show only my tickets"),
+    q: str | None = Query(None, description="Search subject or description"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -112,7 +113,7 @@ def list_tickets(
     List tickets for the current tenant.
     - Agents only see tickets assigned to them.
     - Admins and owners see all tickets; use assigned_to_me=true to self-filter.
-    - Optional filters: status, priority.
+    - Optional filters: status, priority, q (text search on subject/description).
     - Pagination via skip/limit.
     """
     query = db.query(Ticket).filter(Ticket.tenant_id == current_user.tenant_id)
@@ -126,6 +127,11 @@ def list_tickets(
         query = query.filter(Ticket.status == status.value)
     if priority:
         query = query.filter(Ticket.priority == priority.value)
+    if q:
+        search = f"%{q.lower()}%"
+        query = query.filter(
+            func.lower(Ticket.subject).like(search) | func.lower(Ticket.description).like(search)
+        )
 
     return query.order_by(Ticket.created_at.desc()).offset(skip).limit(limit).all()
 
@@ -135,7 +141,7 @@ def create_ticket(
     payload: TicketCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.OWNER, UserRole.ADMIN)),
-    _quota: None = Depends(check_ticket_quota),
+    _quota: None = Depends(ticket_quota_dependency),
 ):
     """
     Create a new ticket. Only admins and owners can open tickets.
@@ -253,3 +259,18 @@ def update_ticket(
             pass  # Never let email failure break the update
 
     return ticket
+
+
+@router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ticket(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.ADMIN)),
+):
+    """
+    Permanently delete a ticket and all its comments.
+    Owner and admin only.
+    """
+    ticket = get_ticket_or_404(ticket_id, current_user.tenant_id, db)
+    db.delete(ticket)
+    db.commit()

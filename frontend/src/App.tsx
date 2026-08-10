@@ -22,6 +22,7 @@ import SettingsPage from '@/pages/dashboard/SettingsPage'
 import BillingPage from '@/pages/dashboard/BillingPage'
 import BillingSuccessPage from '@/pages/dashboard/BillingSuccessPage'
 import BillingCancelPage from '@/pages/dashboard/BillingCancelPage'
+import NotificationSettingsPage from '@/pages/dashboard/NotificationSettingsPage'
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="agents" element={<AgentsPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="notifications" element={<NotificationSettingsPage />} />
           <Route path="billing" element={<BillingPage />} />
           <Route path="billing/success" element={<BillingSuccessPage />} />
           <Route path="billing/cancel" element={<BillingCancelPage />} />

@@ -28,6 +28,11 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     is_verified = Column(Boolean, nullable=False, default=False)
 
+    # Notification settings
+    notify_new_tickets = Column(Boolean, nullable=False, default=True)
+    notify_ticket_updates = Column(Boolean, nullable=False, default=True)
+    notify_comments = Column(Boolean, nullable=False, default=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
