@@ -21,6 +21,23 @@ import models.user
 
 from routers import auth, billing, comments, customers, tickets, users, tenant, inbound
 
+# Sentry error monitoring (production)
+if settings.SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        integrations=[
+            FastApiIntegration(),
+            SqlalchemyIntegration(),
+        ],
+        traces_sample_rate=1.0 if settings.DEBUG else 0.1,
+        environment="development" if settings.DEBUG else "production",
+        release="ticketdesk@0.1.0",
+    )
+
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Bell, Save, Check } from "lucide-react";
-import { getMe, updateUser } from "@/lib/api";
+import { updateUser } from "@/lib/api";
 import type { UserRead } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth";
 

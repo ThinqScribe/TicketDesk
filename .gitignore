@@ -18,6 +18,8 @@ env/
 .env
 .env.*
 !.env.docker
+!.env.example
+!.env.production.example
 
 # Database
 *.db

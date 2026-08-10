@@ -30,3 +30,6 @@ redis==7.4.0
 
 # Seed script
 faker==40.36.0
+
+# Error monitoring (optional for production)
+sentry-sdk[fastapi]==2.22.0

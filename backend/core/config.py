@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_FREE: int = 100
     RATE_LIMIT_PAID: int = 1000
 
+    # Error monitoring (optional)
+    SENTRY_DSN: str = ""
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_origins(cls, value):
